@@ -1,0 +1,17 @@
+.{
+    .name = .zjson,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .fingerprint = 0x3f03f52aefd1391d,
+    .description = "ECMAScript-compatible JSON.stringify/JSON.parse over JSValue, in Zig",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src/",
+        "README.md",
+    },
+    .dependencies = .{
+        .zvalue = .{ .path = "../z-value" },
+        .znumber = .{ .path = "../z-number" },
+    },
+}
