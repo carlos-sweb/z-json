@@ -22,7 +22,11 @@ pub const JSONError = error{
 
 fn isUnserializable(v: JSValue) bool {
     return switch (v) {
-        .@"undefined", .symbol => true,
+        // Real JSON.stringify treats function values the same way as
+        // undefined: omitted from objects, `null` in arrays, and
+        // JSONError.Unserializable at the top level -- not serialized as
+        // an empty object.
+        .@"undefined", .symbol, .function => true,
         else => false,
     };
 }
@@ -56,7 +60,10 @@ fn writeQuotedString(allocator: Allocator, buf: *std.ArrayList(u8), s: []const u
 
 fn writeValue(allocator: Allocator, buf: *std.ArrayList(u8), value: JSValue) JSONError!void {
     switch (value) {
-        .@"undefined", .symbol => try buf.appendSlice(allocator, "null"),
+        // isUnserializable() already filters .function out of every
+        // recursive call site before writeValue() would see one; this arm
+        // exists only so the switch stays exhaustive.
+        .@"undefined", .symbol, .function => try buf.appendSlice(allocator, "null"),
         .@"null" => try buf.appendSlice(allocator, "null"),
         .boolean => |b| try buf.appendSlice(allocator, if (b) "true" else "false"),
         .number => |n| {
