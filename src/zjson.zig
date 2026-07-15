@@ -82,6 +82,17 @@ fn writeValue(allocator: Allocator, buf: *std.ArrayList(u8), value: JSValue) JSO
             }
         },
         .string => |box| try writeQuotedString(allocator, buf, box.value.data),
+        // Real JSON.stringify serializes a Date as its quoted ISO string
+        // (via Date.prototype.toJSON).
+        .date => |box| {
+            const iso = box.value.toISOString(allocator) catch |e| switch (e) {
+                error.OutOfMemory => return error.OutOfMemory,
+                // Invalid Date stringifies as null in real JS.
+                else => return buf.appendSlice(allocator, "null"),
+            };
+            defer allocator.free(iso);
+            try writeQuotedString(allocator, buf, iso);
+        },
         .array => |box| {
             try buf.append(allocator, '[');
             for (box.value.toSlice(), 0..) |item, i| {
