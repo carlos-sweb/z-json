@@ -121,11 +121,12 @@ fn writeValue(allocator: Allocator, buf: *std.ArrayList(u8), value: JSValue) JSO
             }
             try buf.append(allocator, '}');
         },
-        // Matches real JS: RegExp/Map/Set/Error instances have no own
-        // enumerable properties by default, so JSON.stringify(x) for any of
-        // them is "{}" unless a custom toJSON()/property exists (functions
-        // aren't modeled yet, so that escape hatch doesn't apply here).
-        .regex, .map, .set, .@"error" => try buf.appendSlice(allocator, "{}"),
+        // Matches real JS: RegExp/Map/Set/Error/Promise instances have no
+        // own enumerable properties by default, so JSON.stringify(x) for
+        // any of them is "{}" unless a custom toJSON()/property exists
+        // (functions aren't modeled yet, so that escape hatch doesn't
+        // apply here).
+        .regex, .map, .set, .@"error", .promise => try buf.appendSlice(allocator, "{}"),
     }
 }
 
