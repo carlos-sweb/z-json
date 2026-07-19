@@ -17,6 +17,10 @@ pub const JSONError = error{
     /// erroring: an undefined/symbol array element serializes as "null",
     /// and an undefined/symbol object property is omitted entirely.
     Unserializable,
+    /// A cycle in the value graph (an array/object reachable from
+    /// itself) -- real JSON.stringify throws `TypeError: Converting
+    /// circular structure to JSON`; the embedder maps this to that.
+    CircularStructure,
     OutOfMemory,
 };
 
@@ -58,7 +62,18 @@ fn writeQuotedString(allocator: Allocator, buf: *std.ArrayList(u8), s: []const u
     try buf.append(allocator, '"');
 }
 
-fn writeValue(allocator: Allocator, buf: *std.ArrayList(u8), value: JSValue) JSONError!void {
+/// The container pointers on the current serialization PATH (not all
+/// visited -- diamonds are legal, cycles are not), for cycle detection.
+const SeenStack = std.ArrayList(usize);
+
+fn seenContains(seen: *const SeenStack, ptr: usize) bool {
+    for (seen.items) |p| {
+        if (p == ptr) return true;
+    }
+    return false;
+}
+
+fn writeValue(allocator: Allocator, buf: *std.ArrayList(u8), seen: *SeenStack, value: JSValue) JSONError!void {
     switch (value) {
         // isUnserializable() already filters .function out of every
         // recursive call site before writeValue() would see one; this arm
@@ -94,18 +109,24 @@ fn writeValue(allocator: Allocator, buf: *std.ArrayList(u8), value: JSValue) JSO
             try writeQuotedString(allocator, buf, iso);
         },
         .array => |box| {
+            if (seenContains(seen, @intFromPtr(box))) return JSONError.CircularStructure;
+            try seen.append(allocator, @intFromPtr(box));
+            defer _ = seen.pop();
             try buf.append(allocator, '[');
             for (box.value.toSlice(), 0..) |item, i| {
                 if (i != 0) try buf.append(allocator, ',');
                 if (isUnserializable(item)) {
                     try buf.appendSlice(allocator, "null");
                 } else {
-                    try writeValue(allocator, buf, item);
+                    try writeValue(allocator, buf, seen, item);
                 }
             }
             try buf.append(allocator, ']');
         },
         .object => |box| {
+            if (seenContains(seen, @intFromPtr(box))) return JSONError.CircularStructure;
+            try seen.append(allocator, @intFromPtr(box));
+            defer _ = seen.pop();
             try buf.append(allocator, '{');
             const keys = try box.value.keys(allocator);
             defer allocator.free(keys);
@@ -117,7 +138,7 @@ fn writeValue(allocator: Allocator, buf: *std.ArrayList(u8), value: JSValue) JSO
                 first = false;
                 try writeQuotedString(allocator, buf, key);
                 try buf.append(allocator, ':');
-                try writeValue(allocator, buf, v);
+                try writeValue(allocator, buf, seen, v);
             }
             try buf.append(allocator, '}');
         },
@@ -135,7 +156,9 @@ pub fn stringify(allocator: Allocator, value: JSValue) JSONError![]u8 {
     if (isUnserializable(value)) return JSONError.Unserializable;
     var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(allocator);
-    try writeValue(allocator, &buf, value);
+    var seen: SeenStack = .empty;
+    defer seen.deinit(allocator);
+    try writeValue(allocator, &buf, &seen, value);
     return buf.toOwnedSlice(allocator);
 }
 
