@@ -132,6 +132,10 @@ fn writeValue(allocator: Allocator, buf: *std.ArrayList(u8), seen: *SeenStack, v
             defer allocator.free(keys);
             var first = true;
             for (keys) |key| {
+                // Reserved internal keys (embedder symbol-key encoding,
+                // `\x00`-prefixed) are never serialized -- symbols aren't
+                // JSON keys.
+                if (key.len > 0 and key[0] == 0) continue;
                 const v = box.value.get(key).?;
                 if (isUnserializable(v)) continue;
                 if (!first) try buf.append(allocator, ',');
