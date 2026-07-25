@@ -151,7 +151,20 @@ fn writeValue(allocator: Allocator, buf: *std.ArrayList(u8), seen: *SeenStack, v
         // any of them is "{}" unless a custom toJSON()/property exists
         // (functions aren't modeled yet, so that escape hatch doesn't
         // apply here).
-        .regex, .map, .set, .@"error", .promise => try buf.appendSlice(allocator, "{}"),
+        // Proxy joins this bucket too (documented narrowing, not fixed
+        // for now): real JSON.stringify(proxy) would invoke traps
+        // through to the target, which needs an interpreter/trap-calling
+        // hook z-json doesn't have (a standalone package, no callback
+        // into JS) -- a real architectural gap, not a simple switch arm.
+        .regex, .map, .set, .@"error", .promise, .proxy => try buf.appendSlice(allocator, "{}"),
+        // Unlike undefined/symbol/function (silently omitted/nulled) and
+        // unlike Date (silently serialized), real JSON.stringify THROWS
+        // on a BigInt at ANY position -- top-level, array element, or
+        // object property ("Do not know how to serialize a BigInt").
+        // Deliberately NOT added to isUnserializable()'s omit-bucket:
+        // that would silently null/omit it instead of propagating this
+        // error through the array/object recursion above.
+        .bigint => return JSONError.Unserializable,
     }
 }
 
