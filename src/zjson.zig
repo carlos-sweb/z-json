@@ -157,11 +157,17 @@ fn writeValue(allocator: Allocator, buf: *std.ArrayList(u8), seen: *SeenStack, v
         // hook z-json doesn't have (a standalone package, no callback
         // into JS) -- a real architectural gap, not a simple switch arm.
         // Same treatment as every other object-shaped type this package
-        // doesn't specially serialize (a real narrowing, not a silent
-        // bug -- z-json has no way to introspect an ArrayBuffer's bytes
-        // meaningfully as JSON anyway; real Node also serializes these
-        // as `{}`).
-        .regex, .map, .set, .@"error", .promise, .proxy, .array_buffer, .data_view => try buf.appendSlice(allocator, "{}"),
+        // doesn't specially serialize -- ArrayBuffer/DataView are a real
+        // narrowing but not a MISLEADING one (real Node also gives them
+        // "{}", they have no enumerable own properties). `.typed_array`
+        // is DIFFERENT and known-inaccurate: real Node serializes a
+        // TypedArray's indexed elements (`JSON.stringify(new
+        // Uint8Array([1,2,3]))` -> `{"0":1,"1":2,"2":3}`), not "{}".
+        // Doing that correctly needs z-json to read element bytes via
+        // z-buffer (a new dependency this package doesn't have) -- left
+        // for the TypedArray %prototype% follow-up phase, which already
+        // owns the rest of TypedArray's array-like presentation surface.
+        .regex, .map, .set, .@"error", .promise, .proxy, .array_buffer, .data_view, .typed_array => try buf.appendSlice(allocator, "{}"),
         // Unlike undefined/symbol/function (silently omitted/nulled) and
         // unlike Date (silently serialized), real JSON.stringify THROWS
         // on a BigInt at ANY position -- top-level, array element, or
