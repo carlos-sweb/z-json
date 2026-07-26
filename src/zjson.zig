@@ -156,7 +156,12 @@ fn writeValue(allocator: Allocator, buf: *std.ArrayList(u8), seen: *SeenStack, v
         // through to the target, which needs an interpreter/trap-calling
         // hook z-json doesn't have (a standalone package, no callback
         // into JS) -- a real architectural gap, not a simple switch arm.
-        .regex, .map, .set, .@"error", .promise, .proxy => try buf.appendSlice(allocator, "{}"),
+        // Same treatment as every other object-shaped type this package
+        // doesn't specially serialize (a real narrowing, not a silent
+        // bug -- z-json has no way to introspect an ArrayBuffer's bytes
+        // meaningfully as JSON anyway; real Node also serializes these
+        // as `{}`).
+        .regex, .map, .set, .@"error", .promise, .proxy, .array_buffer, .data_view => try buf.appendSlice(allocator, "{}"),
         // Unlike undefined/symbol/function (silently omitted/nulled) and
         // unlike Date (silently serialized), real JSON.stringify THROWS
         // on a BigInt at ANY position -- top-level, array element, or
