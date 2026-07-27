@@ -13,5 +13,6 @@
     .dependencies = .{
         .zvalue = .{ .path = "../z-value" },
         .znumber = .{ .path = "../z-number" },
+        .zbuffer = .{ .path = "../z-buffer" },
     },
 }

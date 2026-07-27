@@ -6,14 +6,17 @@ pub fn build(b: *std.Build) void {
 
     const zvalue_dep = b.dependency("zvalue", .{ .target = target, .optimize = optimize });
     const znumber_dep = b.dependency("znumber", .{ .target = target, .optimize = optimize });
+    const zbuffer_dep = b.dependency("zbuffer", .{ .target = target, .optimize = optimize });
     const zvalue_module = zvalue_dep.module("zvalue");
     const znumber_module = znumber_dep.module("znumber");
+    const zbuffer_module = zbuffer_dep.module("zbuffer");
 
     const zjson_module = b.addModule("zjson", .{
         .root_source_file = b.path("src/zjson.zig"),
     });
     zjson_module.addImport("zvalue", zvalue_module);
     zjson_module.addImport("znumber", znumber_module);
+    zjson_module.addImport("zbuffer", zbuffer_module);
 
     const test_step = b.step("test", "Run all tests");
 
@@ -34,6 +37,7 @@ pub fn build(b: *std.Build) void {
 
         unit_tests.root_module.addImport("zjson", zjson_module);
         unit_tests.root_module.addImport("zvalue", zvalue_module);
+        unit_tests.root_module.addImport("zbuffer", zbuffer_module);
 
         const run_unit_tests = b.addRunArtifact(unit_tests);
         test_step.dependOn(&run_unit_tests.step);
@@ -49,6 +53,7 @@ pub fn build(b: *std.Build) void {
     });
     src_tests.root_module.addImport("zvalue", zvalue_module);
     src_tests.root_module.addImport("znumber", znumber_module);
+    src_tests.root_module.addImport("zbuffer", zbuffer_module);
     const run_src_tests = b.addRunArtifact(src_tests);
     test_step.dependOn(&run_src_tests.step);
 

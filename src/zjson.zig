@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const zvalue = @import("zvalue");
 const znumber = @import("znumber");
+const zbuffer = @import("zbuffer");
 const JSValue = zvalue.JSValue;
 
 pub const JSONError = error{
@@ -73,6 +74,66 @@ fn seenContains(seen: *const SeenStack, ptr: usize) bool {
     return false;
 }
 
+/// Shared by the plain `.number` arm and typed-array element serialization
+/// below -- both need the exact same NaN/Inf->"null" + znumber formatting.
+fn writeNumberLiteral(allocator: Allocator, buf: *std.ArrayList(u8), n: f64) JSONError!void {
+    if (std.math.isNan(n) or std.math.isInf(n)) {
+        try buf.appendSlice(allocator, "null");
+    } else {
+        // radix is always `null` (base 10) here, so RangeError/bignum
+        // internal errors are unreachable in practice; still must be
+        // mapped since Zig requires the full inferred error set handled.
+        const s = znumber.FormattingMethods.toString(n, allocator, null) catch |e| switch (e) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => unreachable,
+        };
+        defer allocator.free(s);
+        try buf.appendSlice(allocator, s);
+    }
+}
+
+/// Real JSON.stringify serializes a TypedArray's indexed elements as a
+/// plain object (`{"0":1,"1":2,...}`), not `{}` -- verified against real
+/// Node. BigInt64Array/BigUint64Array elements are real BigInts, which
+/// JSON.stringify always throws on (matches the `.bigint` arm below).
+fn writeTypedArrayElem(allocator: Allocator, buf: *std.ArrayList(u8), box: *zvalue.TypedArrayBox) JSONError!void {
+    if (box.kind == .i64 or box.kind == .u64) return JSONError.Unserializable;
+    const arraybuf = &box.owner.array_buffer.value;
+    try buf.append(allocator, '{');
+
+    // Build the view ONCE per kind (not per element) -- these `catch
+    // unreachable` calls are safe because `box.byte_offset`/`box.len` were
+    // already validated when the TypedArray was constructed.
+    switch (box.kind) {
+        inline .i8, .u8, .u8_clamped, .i16, .u16, .i32, .u32, .f32, .f64 => |kind| {
+            const T = comptime switch (kind) {
+                .i8 => i8,
+                .u8, .u8_clamped => u8,
+                .i16 => i16,
+                .u16 => u16,
+                .i32 => i32,
+                .u32 => u32,
+                .f32 => f32,
+                .f64 => f64,
+                else => unreachable,
+            };
+            const view = zbuffer.TypedArrayView(T).init(arraybuf, box.byte_offset, box.len) catch unreachable;
+            var i: usize = 0;
+            while (i < box.len) : (i += 1) {
+                if (i != 0) try buf.append(allocator, ',');
+                const idx = std.fmt.allocPrint(allocator, "\"{d}\":", .{i}) catch return error.OutOfMemory;
+                defer allocator.free(idx);
+                try buf.appendSlice(allocator, idx);
+                const v = view.get(i) catch unreachable;
+                const n: f64 = if (T == f32 or T == f64) v else @floatFromInt(v);
+                try writeNumberLiteral(allocator, buf, n);
+            }
+        },
+        .i64, .u64 => unreachable, // returned Unserializable above
+    }
+    try buf.append(allocator, '}');
+}
+
 fn writeValue(allocator: Allocator, buf: *std.ArrayList(u8), seen: *SeenStack, value: JSValue) JSONError!void {
     switch (value) {
         // isUnserializable() already filters .function out of every
@@ -81,21 +142,7 @@ fn writeValue(allocator: Allocator, buf: *std.ArrayList(u8), seen: *SeenStack, v
         .@"undefined", .symbol, .function => try buf.appendSlice(allocator, "null"),
         .@"null" => try buf.appendSlice(allocator, "null"),
         .boolean => |b| try buf.appendSlice(allocator, if (b) "true" else "false"),
-        .number => |n| {
-            if (std.math.isNan(n) or std.math.isInf(n)) {
-                try buf.appendSlice(allocator, "null");
-            } else {
-                // radix is always `null` (base 10) here, so RangeError/bignum
-                // internal errors are unreachable in practice; still must be
-                // mapped since Zig requires the full inferred error set handled.
-                const s = znumber.FormattingMethods.toString(n, allocator, null) catch |e| switch (e) {
-                    error.OutOfMemory => return error.OutOfMemory,
-                    else => unreachable,
-                };
-                defer allocator.free(s);
-                try buf.appendSlice(allocator, s);
-            }
-        },
+        .number => |n| try writeNumberLiteral(allocator, buf, n),
         .string => |box| try writeQuotedString(allocator, buf, box.value.data),
         // Real JSON.stringify serializes a Date as its quoted ISO string
         // (via Date.prototype.toJSON).
@@ -156,18 +203,15 @@ fn writeValue(allocator: Allocator, buf: *std.ArrayList(u8), seen: *SeenStack, v
         // through to the target, which needs an interpreter/trap-calling
         // hook z-json doesn't have (a standalone package, no callback
         // into JS) -- a real architectural gap, not a simple switch arm.
-        // Same treatment as every other object-shaped type this package
-        // doesn't specially serialize -- ArrayBuffer/DataView are a real
-        // narrowing but not a MISLEADING one (real Node also gives them
-        // "{}", they have no enumerable own properties). `.typed_array`
-        // is DIFFERENT and known-inaccurate: real Node serializes a
-        // TypedArray's indexed elements (`JSON.stringify(new
-        // Uint8Array([1,2,3]))` -> `{"0":1,"1":2,"2":3}`), not "{}".
-        // Doing that correctly needs z-json to read element bytes via
-        // z-buffer (a new dependency this package doesn't have) -- left
-        // for the TypedArray %prototype% follow-up phase, which already
-        // owns the rest of TypedArray's array-like presentation surface.
-        .regex, .map, .set, .@"error", .promise, .proxy, .array_buffer, .data_view, .typed_array => try buf.appendSlice(allocator, "{}"),
+        // ArrayBuffer/DataView also give "{}" here, which matches real
+        // Node exactly (they have no enumerable own properties either).
+        .regex, .map, .set, .@"error", .promise, .proxy, .array_buffer, .data_view => try buf.appendSlice(allocator, "{}"),
+        // Unlike ArrayBuffer/DataView above, a TypedArray's indexed
+        // elements ARE real enumerable own properties in JS -- real Node
+        // serializes them (`JSON.stringify(new Uint8Array([1,2,3]))` ->
+        // `{"0":1,"1":2,"2":3}`). BigInt64Array/BigUint64Array elements
+        // throw the same Unserializable error a bare BigInt does.
+        .typed_array => |box| try writeTypedArrayElem(allocator, buf, &box.value),
         // Unlike undefined/symbol/function (silently omitted/nulled) and
         // unlike Date (silently serialized), real JSON.stringify THROWS
         // on a BigInt at ANY position -- top-level, array element, or
