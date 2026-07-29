@@ -31,7 +31,13 @@ fn isUnserializable(v: JSValue) bool {
         // undefined: omitted from objects, `null` in arrays, and
         // JSONError.Unserializable at the top level -- not serialized as
         // an empty object.
-        .@"undefined", .symbol, .function => true,
+        // NARROWING: real Temporal instances have no own enumerable
+        // properties, so real JSON.stringify actually serializes them as
+        // `{}` (no toJSON, SerializeJSONObject finds nothing to write) --
+        // NOT unserializable. Treated the same as function/symbol here
+        // anyway (simpler, and `{}` would be equally useless/misleading
+        // output) -- revisit if a real consumer needs the spec-exact `{}`.
+        .@"undefined", .symbol, .function, .temporal => true,
         else => false,
     };
 }
@@ -139,7 +145,9 @@ fn writeValue(allocator: Allocator, buf: *std.ArrayList(u8), seen: *SeenStack, v
         // isUnserializable() already filters .function out of every
         // recursive call site before writeValue() would see one; this arm
         // exists only so the switch stays exhaustive.
-        .@"undefined", .symbol, .function => try buf.appendSlice(allocator, "null"),
+        // Real Temporal types have no default toJSON either -- same
+        // "unserializable, becomes null" bucket as function/symbol.
+        .@"undefined", .symbol, .function, .temporal => try buf.appendSlice(allocator, "null"),
         .@"null" => try buf.appendSlice(allocator, "null"),
         .boolean => |b| try buf.appendSlice(allocator, if (b) "true" else "false"),
         .number => |n| try writeNumberLiteral(allocator, buf, n),
