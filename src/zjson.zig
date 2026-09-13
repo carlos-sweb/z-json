@@ -42,28 +42,91 @@ fn isUnserializable(v: JSValue) bool {
     };
 }
 
+/// If `bytes` starts with this engine's WTF-8 encoding of a lone
+/// UTF-16 surrogate (z-string's `encodeSurrogateWtf8` -- duplicated
+/// here since this package has no dependency on z-string, matching
+/// the rest of this ~30-repo family's "small standalone libraries"
+/// convention), returns its value. See z-string-surrogate-charat.md.
+fn encodeWtf8Surrogate(buf: *[3]u8, surrogate: u16) void {
+    buf[0] = 0xE0 | @as(u8, @intCast(surrogate >> 12));
+    buf[1] = 0x80 | @as(u8, @intCast((surrogate >> 6) & 0x3F));
+    buf[2] = 0x80 | @as(u8, @intCast(surrogate & 0x3F));
+}
+
+fn decodeWtf8Surrogate(bytes: []const u8) ?u16 {
+    if (bytes.len < 3) return null;
+    if (bytes[0] & 0xF0 != 0xE0) return null;
+    if (bytes[1] & 0xC0 != 0x80 or bytes[2] & 0xC0 != 0x80) return null;
+    const value: u21 = (@as(u21, bytes[0] & 0x0F) << 12) | (@as(u21, bytes[1] & 0x3F) << 6) | (bytes[2] & 0x3F);
+    if (value < 0xD800 or value > 0xDFFF) return null;
+    return @intCast(value);
+}
+
 fn writeQuotedString(allocator: Allocator, buf: *std.ArrayList(u8), s: []const u8) !void {
     try buf.append(allocator, '"');
-    for (s) |c| {
+    var i: usize = 0;
+    while (i < s.len) {
+        const c = s[i];
         switch (c) {
-            '"' => try buf.appendSlice(allocator, "\\\""),
-            '\\' => try buf.appendSlice(allocator, "\\\\"),
-            0x08 => try buf.appendSlice(allocator, "\\b"),
-            0x0C => try buf.appendSlice(allocator, "\\f"),
-            '\n' => try buf.appendSlice(allocator, "\\n"),
-            '\r' => try buf.appendSlice(allocator, "\\r"),
-            '\t' => try buf.appendSlice(allocator, "\\t"),
+            '"' => {
+                try buf.appendSlice(allocator, "\\\"");
+                i += 1;
+            },
+            '\\' => {
+                try buf.appendSlice(allocator, "\\\\");
+                i += 1;
+            },
+            0x08 => {
+                try buf.appendSlice(allocator, "\\b");
+                i += 1;
+            },
+            0x0C => {
+                try buf.appendSlice(allocator, "\\f");
+                i += 1;
+            },
+            '\n' => {
+                try buf.appendSlice(allocator, "\\n");
+                i += 1;
+            },
+            '\r' => {
+                try buf.appendSlice(allocator, "\\r");
+                i += 1;
+            },
+            '\t' => {
+                try buf.appendSlice(allocator, "\\t");
+                i += 1;
+            },
             0x00...0x07, 0x0B, 0x0E...0x1F => {
                 var esc_buf: [6]u8 = undefined;
                 const esc = std.fmt.bufPrint(&esc_buf, "\\u{x:0>4}", .{c}) catch unreachable;
                 try buf.appendSlice(allocator, esc);
+                i += 1;
             },
-            // Every other byte (ASCII printable, or a UTF-8 continuation/lead
-            // byte >= 0x80) is valid to emit verbatim inside a JSON string;
-            // iterating byte-by-byte still reconstructs multi-byte UTF-8
-            // sequences correctly since none of their bytes collide with the
-            // escaped ranges above.
-            else => try buf.append(allocator, c),
+            else => {
+                // A lone WTF-8-encoded surrogate (from splitting an
+                // astral pair, or an unpaired `\u` escape) must come
+                // out as a real `\uXXXX` ASCII escape -- its raw
+                // bytes aren't valid UTF-8, and JSON text must be
+                // well-formed UTF-8 (confirmed against real Node:
+                // `JSON.stringify("\ud800")` is the 8-character text
+                // `"\ud800"`, not 3 raw bytes).
+                if (decodeWtf8Surrogate(s[i..])) |surrogate| {
+                    var esc_buf: [6]u8 = undefined;
+                    const esc = std.fmt.bufPrint(&esc_buf, "\\u{x:0>4}", .{surrogate}) catch unreachable;
+                    try buf.appendSlice(allocator, esc);
+                    i += 3;
+                    continue;
+                }
+                // Every other byte (ASCII printable, or a UTF-8
+                // continuation/lead byte >= 0x80) is valid to emit
+                // verbatim inside a JSON string; walking byte-by-byte
+                // still reconstructs multi-byte UTF-8 sequences
+                // correctly since none of their bytes collide with
+                // the escaped ranges above or with a WTF-8 surrogate's
+                // own leading-byte shape (0xE0-0xEF, checked first).
+                try buf.append(allocator, c);
+                i += 1;
+            },
         }
     }
     try buf.append(allocator, '"');
@@ -330,6 +393,15 @@ const Parser = struct {
                     self.pos += 1;
                     const first = try self.parseUnicodeEscape();
                     var cp: u21 = first;
+                    // A lone surrogate (unpaired \u escape) is a real,
+                    // legal JS string value -- WTF-8-encode it (z-string's
+                    // encodeSurrogateWtf8, duplicated here since this
+                    // package doesn't depend on z-string) instead of
+                    // substituting U+FFFD, confirmed against real Node:
+                    // `JSON.parse('"\\ud800"')` preserves the surrogate
+                    // (round-trips through JSON.stringify as `"\ud800"`),
+                    // it does not become the replacement character.
+                    var lone_surrogate: ?u16 = null;
                     if (first >= 0xD800 and first <= 0xDBFF) {
                         // High surrogate: look for a following \uXXXX low
                         // surrogate to combine into one codepoint.
@@ -343,17 +415,23 @@ const Parser = struct {
                                 // Not a low surrogate after all -- rewind and
                                 // treat the high surrogate as lone.
                                 self.pos = save;
-                                cp = 0xFFFD;
+                                lone_surrogate = first;
                             }
                         } else {
-                            cp = 0xFFFD; // lone high surrogate
+                            lone_surrogate = first; // lone high surrogate
                         }
                     } else if (first >= 0xDC00 and first <= 0xDFFF) {
-                        cp = 0xFFFD; // lone low surrogate
+                        lone_surrogate = first; // lone low surrogate
                     }
-                    var enc_buf: [4]u8 = undefined;
-                    const len = std.unicode.utf8Encode(cp, &enc_buf) catch return JSONError.InvalidString;
-                    try buf.appendSlice(self.allocator, enc_buf[0..len]);
+                    if (lone_surrogate) |surrogate| {
+                        var wtf8_buf: [3]u8 = undefined;
+                        encodeWtf8Surrogate(&wtf8_buf, surrogate);
+                        try buf.appendSlice(self.allocator, &wtf8_buf);
+                    } else {
+                        var enc_buf: [4]u8 = undefined;
+                        const len = std.unicode.utf8Encode(cp, &enc_buf) catch return JSONError.InvalidString;
+                        try buf.appendSlice(self.allocator, enc_buf[0..len]);
+                    }
                 },
                 else => return JSONError.InvalidString,
             }
