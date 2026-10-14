@@ -13,10 +13,24 @@ pub fn build(b: *std.Build) void {
 
     const zjson_module = b.addModule("zjson", .{
         .root_source_file = b.path("src/zjson.zig"),
+        .target = target,
+        .optimize = optimize,
     });
     zjson_module.addImport("zvalue", zvalue_module);
     zjson_module.addImport("znumber", znumber_module);
     zjson_module.addImport("zbuffer", zbuffer_module);
+
+    const docs_library = b.addLibrary(.{
+        .name = "zjson",
+        .root_module = zjson_module,
+    });
+    const install_docs = b.addInstallDirectory(.{
+        .source_dir = docs_library.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "docs",
+    });
+    const docs_step = b.step("docs", "Generate Zig API documentation");
+    docs_step.dependOn(&install_docs.step);
 
     const test_step = b.step("test", "Run all tests");
 

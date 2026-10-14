@@ -1,3 +1,7 @@
+//! ECMAScript-compatible JSON parsing and serialization over z-value JSValue.
+//! Parsed values own their contents; release them with JSValue.deinit().
+//! Serialized buffers belong to the caller and must be freed with the allocator.
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const zvalue = @import("zvalue");
@@ -5,6 +9,9 @@ const znumber = @import("znumber");
 const zbuffer = @import("zbuffer");
 const JSValue = zvalue.JSValue;
 
+/// Errors reported while parsing or serializing JSON values.
+/// OutOfMemory indicates allocation failure; other members describe invalid
+/// input, unsupported values or syntax, and serialization constraints.
 pub const JSONError = error{
     UnexpectedToken,
     UnexpectedEnd,
@@ -37,7 +44,7 @@ fn isUnserializable(v: JSValue) bool {
         // NOT unserializable. Treated the same as function/symbol here
         // anyway (simpler, and `{}` would be equally useless/misleading
         // output) -- revisit if a real consumer needs the spec-exact `{}`.
-        .@"undefined", .symbol, .function, .temporal => true,
+        .undefined, .symbol, .function, .temporal => true,
         else => false,
     };
 }
@@ -210,8 +217,8 @@ fn writeValue(allocator: Allocator, buf: *std.ArrayList(u8), seen: *SeenStack, v
         // exists only so the switch stays exhaustive.
         // Real Temporal types have no default toJSON either -- same
         // "unserializable, becomes null" bucket as function/symbol.
-        .@"undefined", .symbol, .function, .temporal => try buf.appendSlice(allocator, "null"),
-        .@"null" => try buf.appendSlice(allocator, "null"),
+        .undefined, .symbol, .function, .temporal => try buf.appendSlice(allocator, "null"),
+        .null => try buf.appendSlice(allocator, "null"),
         .boolean => |b| try buf.appendSlice(allocator, if (b) "true" else "false"),
         .number => |n| try writeNumberLiteral(allocator, buf, n),
         .string => |box| try writeQuotedString(allocator, buf, box.value.data),
@@ -295,6 +302,10 @@ fn writeValue(allocator: Allocator, buf: *std.ArrayList(u8), seen: *SeenStack, v
 }
 
 /// JSON.stringify(value) with no replacer/space argument.
+/// `value` is borrowed and remains owned by the caller. `allocator` allocates
+/// the returned buffer; release it with `allocator.free()`.
+/// Cycles return `CircularStructure`; unsupported values return `Unserializable`.
+/// Allocation failure returns `OutOfMemory`.
 pub fn stringify(allocator: Allocator, value: JSValue) JSONError![]u8 {
     if (isUnserializable(value)) return JSONError.Unserializable;
     var buf: std.ArrayList(u8) = .empty;
@@ -594,6 +605,9 @@ const Parser = struct {
 /// bare "0", an exponent requires at least one digit). The returned JSValue
 /// tree is freeable with a single top-level `.deinit()`, same as any other
 /// hand-built JSValue tree.
+/// `allocator` owns the returned tree; `text` is borrowed for this call.
+/// Release the returned value with `deinit()`. Malformed or unsupported input
+/// returns `JSONError`; allocation failure returns `OutOfMemory`.
 pub fn parse(allocator: Allocator, text: []const u8) JSONError!JSValue {
     var parser = Parser{ .allocator = allocator, .input = text, .pos = 0 };
     const value = try parser.parseValue();
@@ -690,7 +704,7 @@ test "parse primitives" {
 
     var nl = try parse(allocator, "null");
     defer nl.deinit();
-    try std.testing.expect(nl == .@"null");
+    try std.testing.expect(nl == .null);
 }
 
 test "parse rejects malformed JSON numbers valid as JS literals" {
