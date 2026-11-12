@@ -517,7 +517,7 @@ const Parser = struct {
             self.skipWs();
             const value = try self.parseValue();
             errdefer value.deinit();
-            _ = try arr.array.value.push(value);
+            _ = arr.array.value.push(value) catch return JSONError.OutOfMemory;
 
             self.skipWs();
             const c = self.peekByteOrEnd() orelse return JSONError.UnexpectedEnd;
