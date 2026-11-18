@@ -13,16 +13,16 @@
     },
     .dependencies = .{
         .zvalue = .{
-            .url = "https://github.com/carlos-sweb/z-value/archive/refs/tags/v0.1.3.tar.gz",
-            .hash = "zvalue-0.1.0-DI9AtcjRAQDJfnmForp4R5nDX9oMSvv0TjpDvvVo8_w-",
+            .url = "https://github.com/carlos-sweb/z-value/archive/refs/tags/v0.1.4.tar.gz",
+            .hash = "zvalue-0.1.0-DI9AtcjRAQCu9C9LXkT8cYuxF_0AdU6S0DJQzNtNzD62",
         },
         .znumber = .{
             .url = "https://github.com/carlos-sweb/z-number/archive/refs/tags/v0.1.0.tar.gz",
             .hash = "znumber-0.1.0-ZBd29k1PdAD3V_SXlyBTBM0R0duQq2PMC4bOHMNch2Yd",
         },
         .zbuffer = .{
-            .url = "https://github.com/carlos-sweb/z-buffer/archive/refs/tags/v0.1.0.tar.gz",
-            .hash = "zbuffer-0.1.0-bUHCsDXIAAB1Yt5RcFhEApi6XO8NeV32ia8WvM3QttNv",
+            .url = "https://github.com/carlos-sweb/z-buffer/archive/refs/tags/v0.1.1.tar.gz",
+            .hash = "zbuffer-0.1.0-bUHCsCvMAAD6dpV4Ofp4QRBTnoGmzwr1Z9LDf5GDx3CB",
         },
     },
 }
