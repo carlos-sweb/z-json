@@ -13,8 +13,8 @@
     },
     .dependencies = .{
         .zvalue = .{
-            .url = "git+https://github.com/carlos-sweb/z-value?ref=v0.1.6#93e085be14472520fb9876326fc55bd14224d6b1",
-            .hash = "zvalue-0.1.0-DI9AteDRAQBa5KLH2gcljxJMHW5yXQ6gOC9NemQMpXOT",
+            .url = "git+https://github.com/carlos-sweb/z-value?ref=v0.1.7#efd1463a59980b4e8a3b5ae8ec19d6848e94199d",
+            .hash = "zvalue-0.1.0-DI9AteDRAQAyiQ0UoUKEMJOGaE2qRU9QBwta_2NHed5m",
         },
         .znumber = .{
             .url = "https://github.com/carlos-sweb/z-number/archive/refs/tags/v0.1.0.tar.gz",
