@@ -9,10 +9,10 @@ test "stringify nested array/object matches expected JSON text" {
     const allocator = testing.allocator;
     var arr = try JSValue.newArray(allocator);
     defer arr.deinit();
-    _ = try arr.array.value.push(JSValue.fromNumber(1.0));
+    _ = try arr.asArray().value.push(JSValue.fromNumber(1.0));
 
     var obj = try JSValue.newObject(allocator);
-    try obj.object.value.set("nested", arr.retain());
+    try obj.asObject().value.set("nested", arr.retain());
     defer obj.deinit();
 
     const out = try zjson.stringify(allocator, obj);
@@ -35,7 +35,7 @@ test "stringify does not mutate or free its input" {
 test "stringify TypedArray serializes indexed elements like real Node" {
     const allocator = testing.allocator;
     const buf = try JSValue.newArrayBuffer(allocator, 12);
-    const view = try zbuffer.TypedArrayView(i32).init(&buf.array_buffer.value, 0, 3);
+    const view = try zbuffer.TypedArrayView(i32).init(&buf.asArrayBuffer().value, 0, 3);
     try view.set(0, 1);
     try view.set(1, 2);
     try view.set(2, 3);
@@ -50,7 +50,7 @@ test "stringify TypedArray serializes indexed elements like real Node" {
 test "stringify Float64Array preserves fractional/negative values" {
     const allocator = testing.allocator;
     const buf = try JSValue.newArrayBuffer(allocator, 16);
-    const view = try zbuffer.TypedArrayView(f64).init(&buf.array_buffer.value, 0, 2);
+    const view = try zbuffer.TypedArrayView(f64).init(&buf.asArrayBuffer().value, 0, 2);
     try view.set(0, 1.5);
     try view.set(1, -2.5);
     const ta = try JSValue.newTypedArray(allocator, buf, 0, 2, .f64);
@@ -75,7 +75,7 @@ test "stringify empty TypedArray gives {}" {
 test "stringify BigInt64Array/BigUint64Array throws Unserializable" {
     const allocator = testing.allocator;
     const buf = try JSValue.newArrayBuffer(allocator, 8);
-    const view = try zbuffer.TypedArrayView(i64).init(&buf.array_buffer.value, 0, 1);
+    const view = try zbuffer.TypedArrayView(i64).init(&buf.asArrayBuffer().value, 0, 1);
     try view.set(0, 1);
     const ta = try JSValue.newTypedArray(allocator, buf, 0, 1, .i64);
     defer ta.deinit();
@@ -86,14 +86,14 @@ test "stringify BigInt64Array/BigUint64Array throws Unserializable" {
 test "stringify TypedArray nested in array/object" {
     const allocator = testing.allocator;
     const buf = try JSValue.newArrayBuffer(allocator, 8);
-    const view = try zbuffer.TypedArrayView(i32).init(&buf.array_buffer.value, 0, 2);
+    const view = try zbuffer.TypedArrayView(i32).init(&buf.asArrayBuffer().value, 0, 2);
     try view.set(0, 9);
     try view.set(1, 8);
     const ta = try JSValue.newTypedArray(allocator, buf, 0, 2, .i32);
 
     var obj = try JSValue.newObject(allocator);
     defer obj.deinit();
-    try obj.object.value.set("a", ta);
+    try obj.asObject().value.set("a", ta);
 
     const out = try zjson.stringify(allocator, obj);
     defer allocator.free(out);
@@ -103,7 +103,7 @@ test "stringify TypedArray nested in array/object" {
 test "stringify Uint8ClampedArray reads through the same u8 storage as Uint8Array" {
     const allocator = testing.allocator;
     const buf = try JSValue.newArrayBuffer(allocator, 2);
-    const view = try zbuffer.TypedArrayView(u8).init(&buf.array_buffer.value, 0, 2);
+    const view = try zbuffer.TypedArrayView(u8).init(&buf.asArrayBuffer().value, 0, 2);
     try view.set(0, 255);
     try view.set(1, 0);
     const ta = try JSValue.newTypedArray(allocator, buf, 0, 2, .u8_clamped);

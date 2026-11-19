@@ -33,7 +33,7 @@ pub const JSONError = error{
 };
 
 fn isUnserializable(v: JSValue) bool {
-    return switch (v) {
+    return switch (v.tag()) {
         // Real JSON.stringify treats function values the same way as
         // undefined: omitted from objects, `null` in arrays, and
         // JSONError.Unserializable at the top level -- not serialized as
@@ -174,7 +174,7 @@ fn writeNumberLiteral(allocator: Allocator, buf: *std.ArrayList(u8), n: f64) JSO
 /// JSON.stringify always throws on (matches the `.bigint` arm below).
 fn writeTypedArrayElem(allocator: Allocator, buf: *std.ArrayList(u8), box: *zvalue.TypedArrayBox) JSONError!void {
     if (box.kind == .i64 or box.kind == .u64) return JSONError.Unserializable;
-    const arraybuf = &box.owner.array_buffer.value;
+    const arraybuf = &box.owner.asArrayBuffer().value;
     try buf.append(allocator, '{');
 
     // Build the view ONCE per kind (not per element) -- these `catch
@@ -211,7 +211,7 @@ fn writeTypedArrayElem(allocator: Allocator, buf: *std.ArrayList(u8), box: *zval
 }
 
 fn writeValue(allocator: Allocator, buf: *std.ArrayList(u8), seen: *SeenStack, value: JSValue) JSONError!void {
-    switch (value) {
+    switch (value.unpack()) {
         // isUnserializable() already filters .function out of every
         // recursive call site before writeValue() would see one; this arm
         // exists only so the switch stays exhaustive.
@@ -517,7 +517,7 @@ const Parser = struct {
             self.skipWs();
             const value = try self.parseValue();
             errdefer value.deinit();
-            _ = arr.array.value.push(value) catch return JSONError.OutOfMemory;
+            _ = arr.asArray().value.push(value) catch return JSONError.OutOfMemory;
 
             self.skipWs();
             const c = self.peekByteOrEnd() orelse return JSONError.UnexpectedEnd;
@@ -563,7 +563,7 @@ const Parser = struct {
             // never frozen/sealed/non-extensible, so ZObjectError's variants
             // besides OutOfMemory are unreachable here; still must be mapped
             // since Zig requires the full inferred error set handled.
-            obj.object.value.set(key, value) catch |e| switch (e) {
+            obj.asObject().value.set(key, value) catch |e| switch (e) {
                 error.OutOfMemory => return error.OutOfMemory,
                 else => unreachable,
             };
@@ -653,9 +653,9 @@ test "stringify array: undefined/symbol elements become null" {
     const allocator = std.testing.allocator;
     var arr = try JSValue.newArray(allocator);
     defer arr.deinit();
-    _ = try arr.array.value.push(JSValue.fromNumber(1.0));
-    _ = try arr.array.value.push(JSValue.UNDEFINED);
-    _ = try arr.array.value.push(try JSValue.newSymbol(allocator, null));
+    _ = try arr.asArray().value.push(JSValue.fromNumber(1.0));
+    _ = try arr.asArray().value.push(JSValue.UNDEFINED);
+    _ = try arr.asArray().value.push(try JSValue.newSymbol(allocator, null));
 
     const out = try stringify(allocator, arr);
     defer allocator.free(out);
@@ -666,9 +666,9 @@ test "stringify object: undefined/symbol properties are omitted" {
     const allocator = std.testing.allocator;
     var obj = try JSValue.newObject(allocator);
     defer obj.deinit();
-    try obj.object.value.set("a", JSValue.fromNumber(1.0));
-    try obj.object.value.set("skip", JSValue.UNDEFINED);
-    try obj.object.value.set("b", JSValue.fromBool(false));
+    try obj.asObject().value.set("a", JSValue.fromNumber(1.0));
+    try obj.asObject().value.set("skip", JSValue.UNDEFINED);
+    try obj.asObject().value.set("b", JSValue.fromBool(false));
 
     const out = try stringify(allocator, obj);
     defer allocator.free(out);
@@ -696,15 +696,15 @@ test "parse primitives" {
 
     var t = try parse(allocator, "true");
     defer t.deinit();
-    try std.testing.expect(t.boolean == true);
+    try std.testing.expect(t.asBool() == true);
 
     var n = try parse(allocator, "  -12.5e2  ");
     defer n.deinit();
-    try std.testing.expectEqual(@as(f64, -1250.0), n.number);
+    try std.testing.expectEqual(@as(f64, -1250.0), n.asNumber());
 
     var nl = try parse(allocator, "null");
     defer nl.deinit();
-    try std.testing.expect(nl == .null);
+    try std.testing.expect(nl.isNull());
 }
 
 test "parse rejects malformed JSON numbers valid as JS literals" {
@@ -729,12 +729,12 @@ test "parse decodes \\uXXXX escapes and surrogate pairs" {
     const allocator = std.testing.allocator;
     var s = try parse(allocator, "\"\\u0041\\u00e9\"");
     defer s.deinit();
-    try std.testing.expectEqualStrings("A\xc3\xa9", s.string.value.data);
+    try std.testing.expectEqualStrings("A\xc3\xa9", s.asString().value.data);
 
     // U+1F600 (grinning face) as a surrogate pair 😀.
     var emoji = try parse(allocator, "\"\\ud83d\\ude00\"");
     defer emoji.deinit();
-    try std.testing.expectEqualStrings("\u{1F600}", emoji.string.value.data);
+    try std.testing.expectEqualStrings("\u{1F600}", emoji.asString().value.data);
 }
 
 test "parse builds a nested tree that frees cleanly with one deinit()" {
@@ -744,7 +744,7 @@ test "parse builds a nested tree that frees cleanly with one deinit()" {
     );
     defer v.deinit();
 
-    try std.testing.expectEqual(@as(usize, 2), v.object.value.size());
-    const a = v.object.value.get("a").?;
-    try std.testing.expectEqual(@as(usize, 3), a.array.value.length());
+    try std.testing.expectEqual(@as(usize, 2), v.asObject().value.size());
+    const a = v.asObject().value.get("a").?;
+    try std.testing.expectEqual(@as(usize, 3), a.asArray().value.length());
 }

@@ -9,23 +9,23 @@ test "parse array of mixed primitives" {
     var v = try zjson.parse(allocator, "[1, \"two\", true, null, false]");
     defer v.deinit();
 
-    try testing.expectEqual(@as(usize, 5), v.array.value.length());
-    try testing.expectEqual(@as(f64, 1.0), v.array.value.get(0).number);
-    try testing.expectEqualStrings("two", v.array.value.get(1).string.value.data);
-    try testing.expect(v.array.value.get(2).boolean == true);
-    try testing.expect(v.array.value.get(3) == .@"null");
-    try testing.expect(v.array.value.get(4).boolean == false);
+    try testing.expectEqual(@as(usize, 5), v.asArray().value.length());
+    try testing.expectEqual(@as(f64, 1.0), v.asArray().value.get(0).asNumber());
+    try testing.expectEqualStrings("two", v.asArray().value.get(1).asString().value.data);
+    try testing.expect(v.asArray().value.get(2).asBool() == true);
+    try testing.expect(v.asArray().value.get(3).isNull());
+    try testing.expect(v.asArray().value.get(4).asBool() == false);
 }
 
 test "parse empty array and object" {
     const allocator = testing.allocator;
     var a = try zjson.parse(allocator, "[]");
     defer a.deinit();
-    try testing.expectEqual(@as(usize, 0), a.array.value.length());
+    try testing.expectEqual(@as(usize, 0), a.asArray().value.length());
 
     var o = try zjson.parse(allocator, "{}");
     defer o.deinit();
-    try testing.expectEqual(@as(usize, 0), o.object.value.size());
+    try testing.expectEqual(@as(usize, 0), o.asObject().value.size());
 }
 
 test "parse rejects unterminated string" {

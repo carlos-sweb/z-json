@@ -6,24 +6,24 @@ const JSValue = zvalue.JSValue;
 
 fn expectDeepEqual(a: JSValue, b: JSValue) !void {
     try testing.expectEqualStrings(a.typeOf(), b.typeOf());
-    switch (a) {
-        .@"undefined", .@"null" => {},
-        .boolean => try testing.expectEqual(a.boolean, b.boolean),
-        .number => try testing.expectEqual(a.number, b.number),
-        .string => try testing.expectEqualStrings(a.string.value.data, b.string.value.data),
+    switch (a.tag()) {
+        .undefined, .null => {},
+        .boolean => try testing.expectEqual(a.asBool(), b.asBool()),
+        .number => try testing.expectEqual(a.asNumber(), b.asNumber()),
+        .string => try testing.expectEqualStrings(a.asString().value.data, b.asString().value.data),
         .array => {
-            try testing.expectEqual(a.array.value.length(), b.array.value.length());
+            try testing.expectEqual(a.asArray().value.length(), b.asArray().value.length());
             var i: usize = 0;
-            while (i < a.array.value.length()) : (i += 1) {
-                try expectDeepEqual(a.array.value.get(i), b.array.value.get(i));
+            while (i < a.asArray().value.length()) : (i += 1) {
+                try expectDeepEqual(a.asArray().value.get(i), b.asArray().value.get(i));
             }
         },
         .object => {
-            const keys = try a.object.value.keys(testing.allocator);
+            const keys = try a.asObject().value.keys(testing.allocator);
             defer testing.allocator.free(keys);
-            try testing.expectEqual(a.object.value.size(), b.object.value.size());
+            try testing.expectEqual(a.asObject().value.size(), b.asObject().value.size());
             for (keys) |key| {
-                try expectDeepEqual(a.object.value.get(key).?, b.object.value.get(key).?);
+                try expectDeepEqual(a.asObject().value.get(key).?, b.asObject().value.get(key).?);
             }
         },
         else => unreachable,
@@ -35,15 +35,15 @@ test "round-trip: parse(stringify(v)) deep-equals v for a nested tree" {
 
     var original = try JSValue.newObject(allocator);
     defer original.deinit();
-    try original.object.value.set("name", try JSValue.newString(allocator, "z-json"));
-    try original.object.value.set("version", JSValue.fromNumber(1.0));
-    try original.object.value.set("active", JSValue.fromBool(true));
-    try original.object.value.set("tag", JSValue.NULL);
+    try original.asObject().value.set("name", try JSValue.newString(allocator, "z-json"));
+    try original.asObject().value.set("version", JSValue.fromNumber(1.0));
+    try original.asObject().value.set("active", JSValue.fromBool(true));
+    try original.asObject().value.set("tag", JSValue.NULL);
 
     var tags = try JSValue.newArray(allocator);
-    _ = try tags.array.value.push(try JSValue.newString(allocator, "a"));
-    _ = try tags.array.value.push(JSValue.fromNumber(2.5));
-    try original.object.value.set("tags", tags);
+    _ = try tags.asArray().value.push(try JSValue.newString(allocator, "a"));
+    _ = try tags.asArray().value.push(JSValue.fromNumber(2.5));
+    try original.asObject().value.set("tags", tags);
 
     const text = try zjson.stringify(allocator, original);
     defer allocator.free(text);
@@ -65,5 +65,5 @@ test "round-trip preserves escaped string content" {
     var parsed = try zjson.parse(allocator, text);
     defer parsed.deinit();
 
-    try testing.expectEqualStrings(s.string.value.data, parsed.string.value.data);
+    try testing.expectEqualStrings(s.asString().value.data, parsed.asString().value.data);
 }
